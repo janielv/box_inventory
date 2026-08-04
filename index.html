@@ -182,12 +182,19 @@ function BoxIconDisplay({ box, locations, size = 42, onClick }) {
   );
 }
 
+// Sync: ensure all box locations exist in the locations array
+function syncLocations(d) {
+  if (!d.locations) d.locations = [];
+  const boxLocs = [...new Set(d.boxes.map(b => b.location).filter(Boolean))];
+  const missing = boxLocs.filter(l => !d.locations.includes(l));
+  if (missing.length > 0) d.locations = [...d.locations, ...missing];
+  return d;
+}
+
 // ===== MAIN APP =====
 function App() {
   const [data, setData] = useState(() => {
-    const d = loadData() || defaultData();
-    if (!d.locations) d.locations = [];
-    return d;
+    return syncLocations(loadData() || defaultData());
   });
   const [tab, setTab] = useState("boxes");
   const [selectedBox, setSelectedBox] = useState(null);
@@ -328,6 +335,7 @@ function App() {
         const imported = JSON.parse(e.target.result);
         if (!imported.boxes || !Array.isArray(imported.boxes)) throw new Error();
         if (!imported.locations) imported.locations = [];
+        syncLocations(imported);
         const merged = { ...imported, lastBackup: Date.now(), changesSinceBackup: 0 };
         setData(merged); saveData(merged); setSelectedBox(null);
         showToast(`已恢复 ${merged.boxes.length} 个箱子`, "success");
