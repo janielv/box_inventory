@@ -26,24 +26,43 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const LOCATIONS = ["客厅", "卧室", "厨房", "车库", "储物间", "阁楼", "阳台", "书房", "其他"];
 const STORAGE_KEY = "box-inventory-v1";
 const genId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
-const compressImage = (file) =>
+// 12 distinct location colors
+const LOC_COLORS = [
+  { bg: "#EFF6FF", fg: "#3B82F6", ring: "#BFDBFE" },
+  { bg: "#F0FDF4", fg: "#22C55E", ring: "#BBF7D0" },
+  { bg: "#FFF7ED", fg: "#F97316", ring: "#FED7AA" },
+  { bg: "#FDF2F8", fg: "#EC4899", ring: "#FBCFE8" },
+  { bg: "#F5F3FF", fg: "#8B5CF6", ring: "#DDD6FE" },
+  { bg: "#FEF9C3", fg: "#CA8A04", ring: "#FDE68A" },
+  { bg: "#ECFEFF", fg: "#06B6D4", ring: "#A5F3FC" },
+  { bg: "#FFF1F2", fg: "#E11D48", ring: "#FECDD3" },
+  { bg: "#F0FDFA", fg: "#14B8A6", ring: "#99F6E4" },
+  { bg: "#EEF2FF", fg: "#6366F1", ring: "#C7D2FE" },
+  { bg: "#FEF3C7", fg: "#D97706", ring: "#FDE68A" },
+  { bg: "#F1F5F9", fg: "#475569", ring: "#CBD5E1" },
+];
+
+const getLocColor = (location, locations) => {
+  if (!location) return { bg: "#F3F4F6", fg: "#9CA3AF", ring: "#E5E7EB" };
+  const idx = locations.indexOf(location);
+  return LOC_COLORS[idx >= 0 ? idx % LOC_COLORS.length : 0];
+};
+
+const compressImage = (file, maxW = 300, quality = 0.5) =>
   new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const maxW = 300;
         const scale = Math.min(1, maxW / img.width);
         canvas.width = img.width * scale;
         canvas.height = img.height * scale;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.5));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
       };
       img.src = e.target.result;
     };
@@ -51,71 +70,34 @@ const compressImage = (file) =>
   });
 
 function loadData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
 }
-
-function saveData(data) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) { console.error("Save failed:", e); }
+function saveData(d) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch(e) { console.error(e); }
 }
+const defaultData = () => ({ boxes: [], locations: [], lastBackup: null, changesSinceBackup: 0 });
 
-const defaultData = () => ({ boxes: [], lastBackup: null, changesSinceBackup: 0 });
+// Icons
+const BoxIcon = () => <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>;
+const SearchIcon = () => <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="7"/><path strokeLinecap="round" d="M21 21l-4.35-4.35"/></svg>;
+const BackupIcon = () => <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>;
+const PlusIcon = () => <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14m-7-7h14"/></svg>;
+const ChevronRight = () => <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M9 5l7 7-7 7"/></svg>;
+const ArrowLeft = () => <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M15 19l-7-7 7-7"/></svg>;
+const CameraIcon = () => <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/></svg>;
+const TrashIcon = () => <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>;
+const MoveIcon = () => <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>;
+const EditIcon = () => <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>;
+const CheckIcon = () => <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>;
+const XIcon = ({ size = 20 }) => <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12"/></svg>;
+const LinkIcon = () => <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>;
 
-// ——— Icons ———
-const BoxIcon = () => (
-  <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-);
-const SearchIcon = () => (
-  <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="7"/><path strokeLinecap="round" d="M21 21l-4.35-4.35"/></svg>
-);
-const BackupIcon = () => (
-  <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-);
-const PlusIcon = () => (
-  <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14m-7-7h14"/></svg>
-);
-const ChevronRight = () => (
-  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M9 5l7 7-7 7"/></svg>
-);
-const ArrowLeft = () => (
-  <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M15 19l-7-7 7-7"/></svg>
-);
-const CameraIcon = () => (
-  <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/></svg>
-);
-const TrashIcon = () => (
-  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-);
-const MoveIcon = () => (
-  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
-);
-const EditIcon = () => (
-  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
-);
-const CheckIcon = () => (
-  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
-);
-const XIcon = ({ size = 20 }) => (
-  <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12"/></svg>
-);
-const LinkIcon = () => (
-  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-);
-
-// Toast
 function Toast({ message, type = "info", onClose }) {
   useEffect(() => { const t = setTimeout(onClose, 2500); return () => clearTimeout(t); }, [onClose]);
   const bg = type === "error" ? "#EF4444" : type === "success" ? "#10B981" : "#3B82F6";
-  return (
-    <div style={{ position:"fixed",top:56,left:16,right:16,zIndex:999,background:bg,color:"#fff",padding:"12px 16px",borderRadius:12,fontSize:14,fontWeight:500,textAlign:"center",boxShadow:"0 4px 20px rgba(0,0,0,0.15)",animation:"slideDown 0.25s ease" }}>
-      {message}
-    </div>
-  );
+  return <div style={{ position:"fixed",top:56,left:16,right:16,zIndex:999,background:bg,color:"#fff",padding:"12px 16px",borderRadius:12,fontSize:14,fontWeight:500,textAlign:"center",boxShadow:"0 4px 20px rgba(0,0,0,0.15)",animation:"slideDown 0.25s ease" }}>{message}</div>;
 }
 
-// Modal
 function Modal({ children, onClose, title }) {
   return (
     <div style={{ position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"flex-end",justifyContent:"center" }} onClick={onClose}>
@@ -130,7 +112,6 @@ function Modal({ children, onClose, title }) {
   );
 }
 
-// Confirm
 function Confirm({ message, onYes, onNo }) {
   return (
     <div style={{ position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
@@ -145,16 +126,75 @@ function Confirm({ message, onYes, onNo }) {
   );
 }
 
+// ===== Location Picker (reusable) =====
+function LocationPicker({ value, locations, onChange, onAddLocation }) {
+  const [adding, setAdding] = useState(false);
+  const [newLoc, setNewLoc] = useState("");
+
+  const handleAdd = () => {
+    const name = newLoc.trim();
+    if (!name) return;
+    const result = onAddLocation(name);
+    if (result !== false) {
+      onChange(name);
+      setAdding(false);
+      setNewLoc("");
+    }
+  };
+
+  if (adding) {
+    return (
+      <div style={{ display:"flex",gap:8 }}>
+        <input value={newLoc} onChange={e=>setNewLoc(e.target.value)} autoFocus placeholder="输入新位置名称"
+          onKeyDown={e => e.key === "Enter" && handleAdd()}
+          style={{ flex:1,padding:"8px 12px",borderRadius:10,border:"1px solid #3B82F6",fontSize:14,outline:"none",color:"#1F2937" }} />
+        <button onClick={handleAdd} style={{ background:"#3B82F6",color:"#fff",border:"none",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16 }}>✓</button>
+        <button onClick={()=>{setAdding(false);setNewLoc("");}} style={{ background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14 }}>✕</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:"flex",gap:8 }}>
+      <select value={value||""} onChange={e=>onChange(e.target.value)}
+        style={{ flex:1,padding:"8px 12px",borderRadius:10,border:"1px solid #E5E7EB",background:"#F9FAFB",fontSize:14,color:"#374151" }}>
+        <option value="">无</option>
+        {locations.map(l => <option key={l} value={l}>{l}</option>)}
+      </select>
+      <button onClick={()=>setAdding(true)} title="添加新位置"
+        style={{ background:"#EFF6FF",color:"#3B82F6",border:"1px solid #BFDBFE",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:18,fontWeight:300,flexShrink:0 }}>+</button>
+    </div>
+  );
+}
+
+// ===== Box Icon Component =====
+function BoxIconDisplay({ box, locations, size = 42, onClick }) {
+  const c = getLocColor(box.location, locations);
+  if (box.icon) {
+    return <img src={box.icon} alt="" onClick={onClick} style={{ width:size,height:size,borderRadius:size*0.26,objectFit:"cover",flexShrink:0,cursor:onClick?"pointer":"default" }} />;
+  }
+  const fontSize = size * 0.4;
+  const initial = box.location ? box.location[0] : "📦";
+  return (
+    <div style={{ width:size,height:size,borderRadius:size*0.26,background:c.bg,border:`2px solid ${c.ring}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:onClick?"pointer":"default" }} onClick={onClick}>
+      <span style={{ fontSize,color:c.fg,fontWeight:700 }}>{initial}</span>
+    </div>
+  );
+}
+
 // ===== MAIN APP =====
 function App() {
-  const [data, setData] = useState(() => loadData() || defaultData());
+  const [data, setData] = useState(() => {
+    const d = loadData() || defaultData();
+    if (!d.locations) d.locations = [];
+    return d;
+  });
   const [tab, setTab] = useState("boxes");
   const [selectedBox, setSelectedBox] = useState(null);
   const [toast, setToast] = useState(null);
   const [locationFilter, setLocationFilter] = useState("全部");
   const [showAddBox, setShowAddBox] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
-  const [editingBox, setEditingBox] = useState(null);
   const [showMoveModal, setShowMoveModal] = useState(null);
   const [batchMode, setBatchMode] = useState(false);
   const [batchSelected, setBatchSelected] = useState(new Set());
@@ -162,17 +202,13 @@ function App() {
   const [viewPhoto, setViewPhoto] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // NFC deep link: read hash on load
   useEffect(() => {
     const handleHash = () => {
       const hash = window.location.hash;
       if (hash.startsWith("#box-")) {
         const boxId = hash.slice(5);
         const d = loadData() || defaultData();
-        if (d.boxes.some(b => b.id === boxId)) {
-          setSelectedBox(boxId);
-          setTab("boxes");
-        }
+        if (d.boxes.some(b => b.id === boxId)) { setSelectedBox(boxId); setTab("boxes"); }
       }
     };
     handleHash();
@@ -182,18 +218,13 @@ function App() {
 
   const persist = useCallback((newData) => {
     const updated = { ...newData, changesSinceBackup: (newData.changesSinceBackup || 0) + 1 };
-    setData(updated);
-    saveData(updated);
-    return updated;
+    setData(updated); saveData(updated); return updated;
   }, []);
 
-  const showToast = (message, type = "info") => setToast({ message, type });
+  const showToast = (msg, type = "info") => setToast({ message: msg, type });
 
-  // Warn on leave if unsaved
   useEffect(() => {
-    const handler = (e) => {
-      if (data.changesSinceBackup >= 5) { e.preventDefault(); e.returnValue = ""; }
-    };
+    const handler = (e) => { if (data.changesSinceBackup >= 5) { e.preventDefault(); e.returnValue = ""; } };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [data.changesSinceBackup]);
@@ -201,10 +232,35 @@ function App() {
   const backupWarning = data.changesSinceBackup >= 5;
   const currentBox = selectedBox ? data.boxes.find(b => b.id === selectedBox) : null;
 
-  // Handlers
-  const addBox = (name, location) => {
+  // ——— Location management ———
+  const addLocation = (name) => {
+    if (data.locations.includes(name)) { showToast("位置名称已存在", "error"); return false; }
+    persist({ ...data, locations: [...data.locations, name] });
+    return true;
+  };
+
+  const deleteLocation = (name) => {
+    const inUse = data.boxes.some(b => b.location === name);
+    if (inUse) { showToast("该位置还有箱子在使用，无法删除", "error"); return; }
+    persist({ ...data, locations: data.locations.filter(l => l !== name) });
+    if (locationFilter === name) setLocationFilter("全部");
+    showToast("位置已删除", "success");
+  };
+
+  const renameLocation = (oldName, newName) => {
+    if (data.locations.includes(newName)) { showToast("位置名称已存在", "error"); return false; }
+    const newLocations = data.locations.map(l => l === oldName ? newName : l);
+    const newBoxes = data.boxes.map(b => b.location === oldName ? { ...b, location: newName } : b);
+    persist({ ...data, locations: newLocations, boxes: newBoxes });
+    if (locationFilter === oldName) setLocationFilter(newName);
+    showToast("位置已重命名", "success");
+    return true;
+  };
+
+  // ——— Box operations ———
+  const addBox = (name, location, icon) => {
     if (data.boxes.some(b => b.name === name)) { showToast("箱子名称已存在，请换一个", "error"); return false; }
-    const box = { id: genId(), name, location, items: [], createdAt: Date.now() };
+    const box = { id: genId(), name, location, icon: icon || "", items: [], createdAt: Date.now() };
     persist({ ...data, boxes: [...data.boxes, box] });
     showToast(`「${name}」已创建`, "success");
     return true;
@@ -213,20 +269,23 @@ function App() {
   const renameBox = (id, newName) => {
     if (data.boxes.some(b => b.name === newName && b.id !== id)) { showToast("箱子名称已存在，请换一个", "error"); return false; }
     persist({ ...data, boxes: data.boxes.map(b => b.id === id ? { ...b, name: newName } : b) });
-    showToast("已重命名", "success");
-    return true;
+    showToast("已重命名", "success"); return true;
   };
 
   const updateBoxLocation = (id, location) => {
     persist({ ...data, boxes: data.boxes.map(b => b.id === id ? { ...b, location } : b) });
   };
 
+  const updateBoxIcon = (id, icon) => {
+    persist({ ...data, boxes: data.boxes.map(b => b.id === id ? { ...b, icon } : b) });
+    showToast("图标已更新", "success");
+  };
+
   const deleteBox = (id) => {
     const box = data.boxes.find(b => b.id === id);
     if (box?.items.length > 0) { showToast("请先清空箱子里的物品", "error"); return; }
     persist({ ...data, boxes: data.boxes.filter(b => b.id !== id) });
-    setSelectedBox(null);
-    showToast("箱子已删除", "success");
+    setSelectedBox(null); showToast("箱子已删除", "success");
   };
 
   const addItem = (boxId, name, photo) => {
@@ -251,23 +310,15 @@ function App() {
     persist({ ...data, boxes: newBoxes });
     const toBox = data.boxes.find(b => b.id === toBoxId);
     showToast(`已移动 ${movingItems.length} 件物品到「${toBox.name}」`, "success");
-    setBatchMode(false);
-    setBatchSelected(new Set());
+    setBatchMode(false); setBatchSelected(new Set());
   };
 
   const exportData = () => {
-    const exportPayload = { ...data, exportedAt: new Date().toISOString(), version: 1 };
-    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `箱子清单备份_${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const blob = new Blob([JSON.stringify({ ...data, exportedAt: new Date().toISOString(), version: 1 }, null, 2)], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `箱子清单备份_${new Date().toISOString().slice(0, 10)}.json`; a.click();
     const updated = { ...data, lastBackup: Date.now(), changesSinceBackup: 0 };
-    setData(updated);
-    saveData(updated);
-    showToast("备份已导出", "success");
+    setData(updated); saveData(updated); showToast("备份已导出", "success");
   };
 
   const importData = (file) => {
@@ -276,40 +327,28 @@ function App() {
       try {
         const imported = JSON.parse(e.target.result);
         if (!imported.boxes || !Array.isArray(imported.boxes)) throw new Error();
+        if (!imported.locations) imported.locations = [];
         const merged = { ...imported, lastBackup: Date.now(), changesSinceBackup: 0 };
-        setData(merged);
-        saveData(merged);
-        setSelectedBox(null);
+        setData(merged); saveData(merged); setSelectedBox(null);
         showToast(`已恢复 ${merged.boxes.length} 个箱子`, "success");
       } catch { showToast("文件格式不正确", "error"); }
     };
     reader.readAsText(file);
   };
 
-  // NFC link helper
-  const getNfcLink = (boxId) => {
-    const base = window.location.href.split("#")[0];
-    return `${base}#box-${boxId}`;
-  };
-
   const copyNfcLink = (boxId) => {
-    const link = getNfcLink(boxId);
+    const link = `${window.location.href.split("#")[0]}#box-${boxId}`;
     navigator.clipboard.writeText(link).then(
       () => showToast("链接已复制，可写入 NFC 贴纸", "success"),
-      () => showToast(link, "info") // fallback: show it
+      () => showToast(link, "info")
     );
   };
 
-  // Search
   const searchResults = searchQuery.trim()
-    ? data.boxes.flatMap(box =>
-        box.items.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()))
-          .map(item => ({ ...item, boxName: box.name, boxId: box.id, boxLocation: box.location }))
-      )
+    ? data.boxes.flatMap(box => box.items.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase())).map(item => ({ ...item, boxName: box.name, boxId: box.id, boxLocation: box.location })))
     : [];
 
   const filteredBoxes = locationFilter === "全部" ? data.boxes : data.boxes.filter(b => b.location === locationFilter);
-  const usedLocations = [...new Set(data.boxes.map(b => b.location).filter(Boolean))];
 
   return (
     <div style={{ background:"#F9FAFB",minHeight:"100vh",paddingBottom:80 }}>
@@ -320,7 +359,6 @@ function App() {
         </div>
       )}
 
-      {/* Backup warning */}
       {backupWarning && tab !== "backup" && (
         <div style={{ background:"#FEF3C7",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #FDE68A" }}>
           <span style={{ fontSize:13,color:"#92400E" }}>已有 {data.changesSinceBackup} 项未备份的改动</span>
@@ -328,22 +366,27 @@ function App() {
         </div>
       )}
 
-      {/* ===== TAB: BOXES LIST ===== */}
+      {/* ===== TAB: BOXES ===== */}
       {tab === "boxes" && !selectedBox && (
         <div>
           <div style={{ padding:"16px 16px 0",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
             <h1 style={{ fontSize:26,fontWeight:800,color:"#111827",letterSpacing:-0.5 }}>我的箱子</h1>
             <button onClick={() => setShowAddBox(true)} style={{ background:"#3B82F6",color:"#fff",border:"none",borderRadius:12,width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",boxShadow:"0 2px 8px rgba(59,130,246,0.3)" }}><PlusIcon/></button>
           </div>
-          {usedLocations.length > 0 && (
+          {data.locations.length > 0 && (
             <div style={{ padding:"12px 16px 0",display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
-              {["全部", ...usedLocations].map(loc => (
-                <button key={loc} onClick={() => setLocationFilter(loc)} style={{
-                  background:locationFilter===loc?"#3B82F6":"#fff",color:locationFilter===loc?"#fff":"#6B7280",
-                  border:locationFilter===loc?"none":"1px solid #E5E7EB",borderRadius:20,padding:"6px 16px",
-                  fontSize:13,fontWeight:500,whiteSpace:"nowrap",cursor:"pointer",flexShrink:0
-                }}>{loc}</button>
-              ))}
+              {["全部", ...data.locations].map(loc => {
+                const c = loc === "全部" ? null : getLocColor(loc, data.locations);
+                const active = locationFilter === loc;
+                return (
+                  <button key={loc} onClick={() => setLocationFilter(loc)} style={{
+                    background: active ? (c ? c.fg : "#3B82F6") : "#fff",
+                    color: active ? "#fff" : (c ? c.fg : "#6B7280"),
+                    border: active ? "none" : `1px solid ${c ? c.ring : "#E5E7EB"}`,
+                    borderRadius:20,padding:"6px 16px",fontSize:13,fontWeight:500,whiteSpace:"nowrap",cursor:"pointer",flexShrink:0
+                  }}>{loc}</button>
+                );
+              })}
             </div>
           )}
           <div style={{ padding:16,display:"flex",flexDirection:"column",gap:10 }}>
@@ -356,11 +399,10 @@ function App() {
             {filteredBoxes.map(box => (
               <button key={box.id} onClick={() => { setSelectedBox(box.id); window.location.hash = `box-${box.id}`; }} style={{
                 background:"#fff",border:"1px solid #F3F4F6",borderRadius:14,padding:"14px 16px",
-                display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",
-                textAlign:"left",width:"100%",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"
+                display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left",width:"100%",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"
               }}>
                 <div style={{ display:"flex",alignItems:"center",gap:12,minWidth:0 }}>
-                  <div style={{ width:42,height:42,borderRadius:11,background:"#EFF6FF",display:"flex",alignItems:"center",justifyContent:"center",color:"#3B82F6",flexShrink:0 }}><BoxIcon/></div>
+                  <BoxIconDisplay box={box} locations={data.locations} size={42} />
                   <div style={{ minWidth:0 }}>
                     <div style={{ fontSize:15,fontWeight:600,color:"#1F2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{box.name}</div>
                     <div style={{ fontSize:13,color:"#9CA3AF",marginTop:2 }}>{box.items.length} 件物品{box.location ? ` · ${box.location}` : ""}</div>
@@ -378,21 +420,22 @@ function App() {
 
       {/* ===== BOX DETAIL ===== */}
       {tab === "boxes" && currentBox && (
-        <BoxDetail
-          box={currentBox} allBoxes={data.boxes}
+        <BoxDetailView
+          box={currentBox} allBoxes={data.boxes} locations={data.locations}
           onBack={() => { setSelectedBox(null); setBatchMode(false); setBatchSelected(new Set()); window.location.hash = ""; }}
           onAddItem={() => setShowAddItem(true)}
           onDeleteItem={(itemId) => setConfirmDelete({ type:"item",boxId:currentBox.id,itemId })}
           onMoveItem={(item) => setShowMoveModal([item])}
           onDeleteBox={() => setConfirmDelete({ type:"box",boxId:currentBox.id })}
-          onRename={(newName) => renameBox(currentBox.id, newName)}
-          onLocationChange={(loc) => updateBoxLocation(currentBox.id, loc)}
+          onRename={(n) => renameBox(currentBox.id, n)}
+          onLocationChange={(l) => updateBoxLocation(currentBox.id, l)}
+          onAddLocation={addLocation}
+          onIconChange={(icon) => updateBoxIcon(currentBox.id, icon)}
           batchMode={batchMode} setBatchMode={setBatchMode}
           batchSelected={batchSelected} setBatchSelected={setBatchSelected}
           onBatchMove={() => {
             if (batchSelected.size === 0) { showToast("请先选择物品","error"); return; }
-            const items = currentBox.items.filter(i => batchSelected.has(i.id));
-            setShowMoveModal(items);
+            setShowMoveModal(currentBox.items.filter(i => batchSelected.has(i.id)));
           }}
           onViewPhoto={setViewPhoto}
           onCopyNfcLink={() => copyNfcLink(currentBox.id)}
@@ -412,11 +455,7 @@ function App() {
             {searchResults.map(item => (
               <button key={item.id} onClick={() => { setSelectedBox(item.boxId); setTab("boxes"); setSearchQuery(""); window.location.hash = `box-${item.boxId}`; }}
                 style={{ background:"#fff",border:"1px solid #F3F4F6",borderRadius:14,padding:"12px 14px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",textAlign:"left",width:"100%",boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
-                {item.photo ? (
-                  <img src={item.photo} alt="" style={{ width:44,height:44,borderRadius:10,objectFit:"cover",flexShrink:0 }} />
-                ) : (
-                  <div style={{ width:44,height:44,borderRadius:10,background:"#F3F4F6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0 }}>📷</div>
-                )}
+                {item.photo ? <img src={item.photo} alt="" style={{ width:44,height:44,borderRadius:10,objectFit:"cover",flexShrink:0 }} /> : <div style={{ width:44,height:44,borderRadius:10,background:"#F3F4F6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0 }}>📷</div>}
                 <div style={{ minWidth:0,flex:1 }}>
                   <div style={{ fontSize:15,fontWeight:600,color:"#1F2937" }}>{item.name}</div>
                   <div style={{ fontSize:13,color:"#3B82F6",marginTop:2 }}>在「{item.boxName}」{item.boxLocation ? ` · ${item.boxLocation}` : ""}</div>
@@ -430,13 +469,13 @@ function App() {
       )}
 
       {/* ===== TAB: BACKUP ===== */}
-      {tab === "backup" && <BackupView data={data} onExport={exportData} onImport={importData} />}
+      {tab === "backup" && <BackupView data={data} onExport={exportData} onImport={importData} locations={data.locations} onDeleteLocation={deleteLocation} onRenameLocation={renameLocation} onAddLocation={addLocation} />}
 
       {/* ===== MODALS ===== */}
-      {showAddBox && <AddBoxModal onClose={() => setShowAddBox(false)} onAdd={addBox} />}
-      {showAddItem && currentBox && <AddItemModal onClose={() => setShowAddItem(false)} onAdd={(name, photo) => addItem(currentBox.id, name, photo)} />}
+      {showAddBox && <AddBoxModal onClose={() => setShowAddBox(false)} onAdd={addBox} locations={data.locations} onAddLocation={addLocation} />}
+      {showAddItem && currentBox && <AddItemModal onClose={() => setShowAddItem(false)} onAdd={(n, p) => addItem(currentBox.id, n, p)} />}
       {showMoveModal && currentBox && (
-        <MoveModal items={showMoveModal} boxes={data.boxes.filter(b => b.id !== currentBox.id)}
+        <MoveModal items={showMoveModal} boxes={data.boxes.filter(b => b.id !== currentBox.id)} locations={data.locations}
           onClose={() => setShowMoveModal(null)}
           onMove={(toBoxId) => { moveItems(currentBox.id, showMoveModal.map(i => i.id), toBoxId); setShowMoveModal(null); }} />
       )}
@@ -446,20 +485,13 @@ function App() {
           onNo={() => setConfirmDelete(null)} />
       )}
 
-      {/* ===== BOTTOM TAB BAR ===== */}
+      {/* ===== BOTTOM TABS ===== */}
       <div style={{ position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid #F3F4F6",display:"flex",justifyContent:"space-around",padding:"8px 0 env(safe-area-inset-bottom, 20px)",zIndex:50 }}>
-        {[
-          { key:"boxes",label:"箱子",icon:<BoxIcon/> },
-          { key:"search",label:"搜索",icon:<SearchIcon/> },
-          { key:"backup",label:"备份",icon:<BackupIcon/> },
-        ].map(t => (
+        {[{ key:"boxes",label:"箱子",icon:<BoxIcon/> },{ key:"search",label:"搜索",icon:<SearchIcon/> },{ key:"backup",label:"设置",icon:<BackupIcon/> }].map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); if(t.key!=="boxes") { setSelectedBox(null); window.location.hash=""; } }}
-            style={{ background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer",padding:"4px 20px",color:tab===t.key?"#3B82F6":"#9CA3AF",transition:"color 0.15s",position:"relative" }}>
-            {t.icon}
-            <span style={{ fontSize:11,fontWeight:tab===t.key?600:400 }}>{t.label}</span>
-            {t.key === "backup" && data.changesSinceBackup >= 5 && (
-              <div style={{ position:"absolute",top:2,right:12,width:8,height:8,borderRadius:4,background:"#F59E0B" }} />
-            )}
+            style={{ background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer",padding:"4px 20px",color:tab===t.key?"#3B82F6":"#9CA3AF",position:"relative" }}>
+            {t.icon}<span style={{ fontSize:11,fontWeight:tab===t.key?600:400 }}>{t.label}</span>
+            {t.key === "backup" && data.changesSinceBackup >= 5 && <div style={{ position:"absolute",top:2,right:12,width:8,height:8,borderRadius:4,background:"#F59E0B" }} />}
           </button>
         ))}
       </div>
@@ -467,27 +499,30 @@ function App() {
   );
 }
 
-// ===== BOX DETAIL =====
-function BoxDetail({ box, allBoxes, onBack, onAddItem, onDeleteItem, onMoveItem, onDeleteBox, onRename, onLocationChange, batchMode, setBatchMode, batchSelected, setBatchSelected, onBatchMove, onViewPhoto, onCopyNfcLink }) {
+// ===== BOX DETAIL VIEW =====
+function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteItem, onMoveItem, onDeleteBox, onRename, onLocationChange, onAddLocation, onIconChange, batchMode, setBatchMode, batchSelected, setBatchSelected, onBatchMove, onViewPhoto, onCopyNfcLink }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(box.name);
   const [showSettings, setShowSettings] = useState(false);
+  const iconRef = useRef();
 
   const handleRename = () => {
-    if (editName.trim() && editName.trim() !== box.name) {
-      const ok = onRename(editName.trim());
-      if (ok !== false) setEditing(false);
-    } else { setEditing(false); setEditName(box.name); }
+    if (editName.trim() && editName.trim() !== box.name) { const ok = onRename(editName.trim()); if (ok !== false) setEditing(false); }
+    else { setEditing(false); setEditName(box.name); }
+  };
+
+  const handleIconUpload = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const compressed = await compressImage(file, 120, 0.6);
+    onIconChange(compressed);
   };
 
   return (
     <div>
       <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-        <button onClick={onBack} style={{ background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,color:"#3B82F6",fontSize:15,fontWeight:500,padding:"4px 0" }}><ArrowLeft/> 返回</button>
+        <button onClick={onBack} style={{ background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,color:"#3B82F6",fontSize:15,fontWeight:500 }}><ArrowLeft/> 返回</button>
         <div style={{ display:"flex",gap:8 }}>
-          {!batchMode && box.items.length > 0 && (
-            <button onClick={() => setBatchMode(true)} style={{ background:"#F3F4F6",border:"none",borderRadius:8,padding:"6px 12px",fontSize:13,fontWeight:500,cursor:"pointer",color:"#374151" }}>批量移动</button>
-          )}
+          {!batchMode && box.items.length > 0 && <button onClick={() => setBatchMode(true)} style={{ background:"#F3F4F6",border:"none",borderRadius:8,padding:"6px 12px",fontSize:13,fontWeight:500,cursor:"pointer",color:"#374151" }}>批量移动</button>}
           <button onClick={() => setShowSettings(!showSettings)} style={{ background:"#F3F4F6",border:"none",borderRadius:8,padding:"6px 10px",fontSize:13,cursor:"pointer",color:"#374151" }}>⋯</button>
         </div>
       </div>
@@ -495,18 +530,17 @@ function BoxDetail({ box, allBoxes, onBack, onAddItem, onDeleteItem, onMoveItem,
       {showSettings && (
         <div style={{ margin:"0 16px 12px",background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,overflow:"hidden" }}>
           <button onClick={() => { setEditing(true); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid #F3F4F6",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#374151" }}><EditIcon/> 重命名箱子</button>
+          <button onClick={() => { iconRef.current?.click(); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid #F3F4F6",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#374151" }}>📷 更换图标照片</button>
+          {box.icon && <button onClick={() => { onIconChange(""); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid #F3F4F6",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#374151" }}>🔄 恢复默认图标</button>}
           <button onClick={() => { onCopyNfcLink(); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid #F3F4F6",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#374151" }}><LinkIcon/> 复制 NFC 链接</button>
-          <div style={{ padding:"12px 16px" }}>
+          <div style={{ padding:"12px 16px",borderBottom:"1px solid #F3F4F6" }}>
             <label style={{ fontSize:12,color:"#9CA3AF",display:"block",marginBottom:6 }}>位置标签</label>
-            <select value={box.location||""} onChange={e => onLocationChange(e.target.value)}
-              style={{ width:"100%",padding:"8px 12px",borderRadius:8,border:"1px solid #E5E7EB",background:"#F9FAFB",fontSize:14,color:"#374151" }}>
-              <option value="">无</option>
-              {LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
-            </select>
+            <LocationPicker value={box.location} locations={locations} onChange={onLocationChange} onAddLocation={onAddLocation} />
           </div>
-          <button onClick={() => { onDeleteBox(); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",borderTop:"1px solid #F3F4F6",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#EF4444" }}><TrashIcon/> 删除箱子</button>
+          <button onClick={() => { onDeleteBox(); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#EF4444" }}><TrashIcon/> 删除箱子</button>
         </div>
       )}
+      <input ref={iconRef} type="file" accept="image/*" onChange={handleIconUpload} style={{ display:"none" }} />
 
       <div style={{ padding:"0 16px 12px" }}>
         {editing ? (
@@ -516,9 +550,12 @@ function BoxDetail({ box, allBoxes, onBack, onAddItem, onDeleteItem, onMoveItem,
             <button onClick={handleRename} style={{ background:"#3B82F6",color:"#fff",border:"none",borderRadius:10,width:40,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer" }}><CheckIcon/></button>
           </div>
         ) : (
-          <div>
-            <h2 style={{ fontSize:22,fontWeight:800,color:"#111827" }}>{box.name}</h2>
-            <p style={{ fontSize:13,color:"#9CA3AF",marginTop:2 }}>{box.items.length} 件物品{box.location ? ` · ${box.location}` : ""}</p>
+          <div style={{ display:"flex",alignItems:"center",gap:14 }}>
+            <BoxIconDisplay box={box} locations={locations} size={52} onClick={() => iconRef.current?.click()} />
+            <div>
+              <h2 style={{ fontSize:22,fontWeight:800,color:"#111827" }}>{box.name}</h2>
+              <p style={{ fontSize:13,color:"#9CA3AF",marginTop:2 }}>{box.items.length} 件物品{box.location ? ` · ${box.location}` : ""}</p>
+            </div>
           </div>
         )}
       </div>
@@ -534,26 +571,17 @@ function BoxDetail({ box, allBoxes, onBack, onAddItem, onDeleteItem, onMoveItem,
       )}
 
       <div style={{ padding:"0 16px",display:"flex",flexDirection:"column",gap:8 }}>
-        {box.items.length === 0 && <div style={{ textAlign:"center",padding:"48px 20px",color:"#9CA3AF" }}><p style={{ fontSize:14 }}>箱子是空的，点下面的按钮添加物品</p></div>}
+        {box.items.length === 0 && <div style={{ textAlign:"center",padding:"48px 20px",color:"#9CA3AF" }}><p style={{ fontSize:14 }}>箱子是空的，点下面的 + 添加物品</p></div>}
         {box.items.map(item => (
-          <div key={item.id} style={{
-            background:"#fff",border:batchSelected.has(item.id)?"2px solid #3B82F6":"1px solid #F3F4F6",
-            borderRadius:14,padding:"10px 12px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"
-          }}>
+          <div key={item.id} style={{ background:"#fff",border:batchSelected.has(item.id)?"2px solid #3B82F6":"1px solid #F3F4F6",borderRadius:14,padding:"10px 12px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
             {batchMode && (
               <button onClick={() => { const s = new Set(batchSelected); s.has(item.id)?s.delete(item.id):s.add(item.id); setBatchSelected(s); }}
                 style={{ width:24,height:24,borderRadius:7,border:batchSelected.has(item.id)?"none":"2px solid #D1D5DB",background:batchSelected.has(item.id)?"#3B82F6":"#fff",flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff" }}>
                 {batchSelected.has(item.id) && <CheckIcon/>}
               </button>
             )}
-            {item.photo ? (
-              <img src={item.photo} alt="" onClick={() => onViewPhoto(item.photo)} style={{ width:50,height:50,borderRadius:10,objectFit:"cover",flexShrink:0,cursor:"pointer" }} />
-            ) : (
-              <div style={{ width:50,height:50,borderRadius:10,background:"#F9FAFB",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0 }}>📷</div>
-            )}
-            <div style={{ flex:1,minWidth:0 }}>
-              <div style={{ fontSize:15,fontWeight:500,color:"#1F2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{item.name}</div>
-            </div>
+            {item.photo ? <img src={item.photo} alt="" onClick={() => onViewPhoto(item.photo)} style={{ width:50,height:50,borderRadius:10,objectFit:"cover",flexShrink:0,cursor:"pointer" }} /> : <div style={{ width:50,height:50,borderRadius:10,background:"#F9FAFB",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0 }}>📷</div>}
+            <div style={{ flex:1,minWidth:0 }}><div style={{ fontSize:15,fontWeight:500,color:"#1F2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{item.name}</div></div>
             {!batchMode && (
               <div style={{ display:"flex",gap:4,flexShrink:0 }}>
                 <button onClick={() => onMoveItem(item)} style={{ background:"#F3F4F6",border:"none",borderRadius:8,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#6B7280" }}><MoveIcon/></button>
@@ -563,28 +591,42 @@ function BoxDetail({ box, allBoxes, onBack, onAddItem, onDeleteItem, onMoveItem,
           </div>
         ))}
       </div>
-
-      {!batchMode && (
-        <button onClick={onAddItem} style={{ position:"fixed",bottom:88,right:20,width:52,height:52,borderRadius:16,background:"#3B82F6",color:"#fff",border:"none",boxShadow:"0 4px 16px rgba(59,130,246,0.35)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",zIndex:40 }}><PlusIcon/></button>
-      )}
+      {!batchMode && <button onClick={onAddItem} style={{ position:"fixed",bottom:88,right:20,width:52,height:52,borderRadius:16,background:"#3B82F6",color:"#fff",border:"none",boxShadow:"0 4px 16px rgba(59,130,246,0.35)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",zIndex:40 }}><PlusIcon/></button>}
     </div>
   );
 }
 
 // ===== ADD BOX MODAL =====
-function AddBoxModal({ onClose, onAdd }) {
+function AddBoxModal({ onClose, onAdd, locations, onAddLocation }) {
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
-  const handleAdd = () => { if (!name.trim()) return; const ok = onAdd(name.trim(), location); if (ok !== false) onClose(); };
+  const [icon, setIcon] = useState("");
+  const iconRef = useRef();
+  const handleAdd = () => { if (!name.trim()) return; const ok = onAdd(name.trim(), location, icon); if (ok !== false) onClose(); };
+  const handleIcon = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setIcon(await compressImage(file, 120, 0.6));
+  };
+
   return (
     <Modal title="新建箱子" onClose={onClose}>
       <input placeholder="箱子名称（如：客厅-1）" value={name} onChange={e => setName(e.target.value)} autoFocus onKeyDown={e => e.key==="Enter"&&handleAdd()}
         style={{ width:"100%",padding:"12px 16px",borderRadius:12,border:"1px solid #E5E7EB",fontSize:16,marginBottom:12,outline:"none",color:"#1F2937" }} />
-      <select value={location} onChange={e => setLocation(e.target.value)}
-        style={{ width:"100%",padding:"12px 16px",borderRadius:12,border:"1px solid #E5E7EB",fontSize:16,marginBottom:16,background:"#fff",color:"#1F2937" }}>
-        <option value="">选择位置（可选）</option>
-        {LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
-      </select>
+
+      <div style={{ marginBottom:12 }}>
+        <label style={{ fontSize:12,color:"#9CA3AF",display:"block",marginBottom:6 }}>位置标签</label>
+        <LocationPicker value={location} locations={locations} onChange={setLocation} onAddLocation={onAddLocation} />
+      </div>
+
+      <div style={{ marginBottom:16 }}>
+        <label style={{ fontSize:12,color:"#9CA3AF",display:"block",marginBottom:6 }}>箱子图标（可选）</label>
+        <input ref={iconRef} type="file" accept="image/*" onChange={handleIcon} style={{ display:"none" }} />
+        <button onClick={() => iconRef.current?.click()} style={{ display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:12,border:"1px dashed #E5E7EB",background:"#FAFAFA",cursor:"pointer",width:"100%" }}>
+          {icon ? <img src={icon} alt="" style={{ width:40,height:40,borderRadius:10,objectFit:"cover" }} /> : <span style={{ fontSize:24 }}>📷</span>}
+          <span style={{ fontSize:14,color:"#9CA3AF" }}>{icon ? "点击更换照片" : "上传箱子照片"}</span>
+        </button>
+      </div>
+
       <button onClick={handleAdd} disabled={!name.trim()} style={{ width:"100%",padding:"14px",borderRadius:12,border:"none",background:name.trim()?"#3B82F6":"#E5E7EB",color:name.trim()?"#fff":"#9CA3AF",fontSize:16,fontWeight:600,cursor:name.trim()?"pointer":"default" }}>创建</button>
     </Modal>
   );
@@ -596,33 +638,15 @@ function AddItemModal({ onClose, onAdd }) {
   const [photo, setPhoto] = useState(null);
   const [compressing, setCompressing] = useState(false);
   const fileRef = useRef();
-  const handlePhoto = async (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    setCompressing(true);
-    const compressed = await compressImage(file);
-    setPhoto(compressed);
-    setCompressing(false);
-  };
+  const handlePhoto = async (e) => { const f = e.target.files?.[0]; if(!f) return; setCompressing(true); setPhoto(await compressImage(f)); setCompressing(false); };
   const handleAdd = () => { if (!name.trim()) return; onAdd(name.trim(), photo); setName(""); setPhoto(null); };
   return (
     <Modal title="添加物品" onClose={onClose}>
-      <input placeholder="物品名称" value={name} onChange={e => setName(e.target.value)} autoFocus
-        style={{ width:"100%",padding:"12px 16px",borderRadius:12,border:"1px solid #E5E7EB",fontSize:16,marginBottom:12,outline:"none",color:"#1F2937" }} />
+      <input placeholder="物品名称" value={name} onChange={e => setName(e.target.value)} autoFocus style={{ width:"100%",padding:"12px 16px",borderRadius:12,border:"1px solid #E5E7EB",fontSize:16,marginBottom:12,outline:"none",color:"#1F2937" }} />
       <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display:"none" }} />
-      <button onClick={() => fileRef.current?.click()} style={{
-        width:"100%",padding:photo?0:"24px 16px",borderRadius:12,border:"2px dashed #E5E7EB",background:"#FAFAFA",cursor:"pointer",
-        display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,marginBottom:16,overflow:"hidden",position:"relative",minHeight:photo?160:undefined
-      }}>
-        {photo ? (
-          <React.Fragment>
-            <img src={photo} alt="" style={{ width:"100%",height:160,objectFit:"cover",borderRadius:10 }} />
-            <div style={{ position:"absolute",bottom:8,right:8,background:"rgba(0,0,0,0.5)",color:"#fff",borderRadius:6,padding:"4px 10px",fontSize:12 }}>重拍</div>
-          </React.Fragment>
-        ) : compressing ? (
-          <span style={{ color:"#9CA3AF",fontSize:14 }}>压缩中...</span>
-        ) : (
-          <React.Fragment><CameraIcon/><span style={{ color:"#9CA3AF",fontSize:14 }}>拍照（可选）</span></React.Fragment>
-        )}
+      <button onClick={() => fileRef.current?.click()} style={{ width:"100%",padding:photo?0:"24px 16px",borderRadius:12,border:"2px dashed #E5E7EB",background:"#FAFAFA",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,marginBottom:16,overflow:"hidden",position:"relative",minHeight:photo?160:undefined }}>
+        {photo ? (<React.Fragment><img src={photo} alt="" style={{ width:"100%",height:160,objectFit:"cover",borderRadius:10 }} /><div style={{ position:"absolute",bottom:8,right:8,background:"rgba(0,0,0,0.5)",color:"#fff",borderRadius:6,padding:"4px 10px",fontSize:12 }}>重拍</div></React.Fragment>
+        ) : compressing ? <span style={{ color:"#9CA3AF",fontSize:14 }}>压缩中...</span> : (<React.Fragment><CameraIcon/><span style={{ color:"#9CA3AF",fontSize:14 }}>拍照（可选）</span></React.Fragment>)}
       </button>
       <div style={{ display:"flex",gap:10 }}>
         <button onClick={handleAdd} disabled={!name.trim()} style={{ flex:1,padding:"14px",borderRadius:12,border:"none",background:name.trim()?"#3B82F6":"#E5E7EB",color:name.trim()?"#fff":"#9CA3AF",fontSize:16,fontWeight:600,cursor:name.trim()?"pointer":"default" }}>添加并继续</button>
@@ -633,15 +657,15 @@ function AddItemModal({ onClose, onAdd }) {
 }
 
 // ===== MOVE MODAL =====
-function MoveModal({ items, boxes, onClose, onMove }) {
-  if (boxes.length === 0) return <Modal title="移动物品" onClose={onClose}><p style={{ color:"#9CA3AF",textAlign:"center",padding:20 }}>没有其他箱子可以移动到，请先创建一个新箱子</p></Modal>;
+function MoveModal({ items, boxes, locations, onClose, onMove }) {
+  if (boxes.length === 0) return <Modal title="移动物品" onClose={onClose}><p style={{ color:"#9CA3AF",textAlign:"center",padding:20 }}>没有其他箱子可以移动到</p></Modal>;
   return (
     <Modal title={`移动 ${items.length} 件物品到...`} onClose={onClose}>
       <div style={{ fontSize:13,color:"#9CA3AF",marginBottom:12 }}>{items.map(i => i.name).join("、")}</div>
       <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
         {boxes.map(box => (
           <button key={box.id} onClick={() => onMove(box.id)} style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",textAlign:"left",width:"100%" }}>
-            <div style={{ width:36,height:36,borderRadius:10,background:"#EFF6FF",display:"flex",alignItems:"center",justifyContent:"center",color:"#3B82F6",flexShrink:0 }}><BoxIcon/></div>
+            <BoxIconDisplay box={box} locations={locations} size={36} />
             <div><div style={{ fontSize:15,fontWeight:500,color:"#1F2937" }}>{box.name}</div><div style={{ fontSize:13,color:"#9CA3AF" }}>{box.items.length} 件物品{box.location?` · ${box.location}`:""}</div></div>
           </button>
         ))}
@@ -650,41 +674,105 @@ function MoveModal({ items, boxes, onClose, onMove }) {
   );
 }
 
-// ===== BACKUP VIEW =====
-function BackupView({ data, onExport, onImport }) {
+// ===== BACKUP & SETTINGS VIEW =====
+function BackupView({ data, onExport, onImport, locations, onDeleteLocation, onRenameLocation, onAddLocation }) {
   const fileRef = useRef();
+  const [editingLoc, setEditingLoc] = useState(null);
+  const [editLocName, setEditLocName] = useState("");
+  const [newLocName, setNewLocName] = useState("");
+  const [showAddLoc, setShowAddLoc] = useState(false);
+
   const lastBackup = data.lastBackup ? new Date(data.lastBackup).toLocaleString("zh-CN",{month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "从未备份";
+  const boxCountByLoc = (loc) => data.boxes.filter(b => b.location === loc).length;
+
+  const handleAddLoc = () => {
+    const n = newLocName.trim();
+    if (!n) return;
+    const ok = onAddLocation(n);
+    if (ok !== false) { setNewLocName(""); setShowAddLoc(false); }
+  };
+
+  const handleRenameLoc = (oldName) => {
+    const n = editLocName.trim();
+    if (!n || n === oldName) { setEditingLoc(null); return; }
+    const ok = onRenameLocation(oldName, n);
+    if (ok !== false) setEditingLoc(null);
+  };
+
   return (
     <div>
-      <div style={{ padding:"16px 16px 0" }}><h1 style={{ fontSize:26,fontWeight:800,color:"#111827",letterSpacing:-0.5 }}>数据备份</h1></div>
+      <div style={{ padding:"16px 16px 0" }}><h1 style={{ fontSize:26,fontWeight:800,color:"#111827",letterSpacing:-0.5 }}>设置</h1></div>
       <div style={{ padding:16,display:"flex",flexDirection:"column",gap:12 }}>
+
+        {/* Location management */}
+        <div style={{ background:"#fff",borderRadius:14,border:"1px solid #F3F4F6",padding:16 }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <div style={{ fontSize:15,fontWeight:600,color:"#374151" }}>位置管理</div>
+            <button onClick={() => setShowAddLoc(true)} style={{ background:"#EFF6FF",color:"#3B82F6",border:"1px solid #BFDBFE",borderRadius:8,padding:"4px 12px",fontSize:13,fontWeight:500,cursor:"pointer" }}>+ 添加</button>
+          </div>
+
+          {showAddLoc && (
+            <div style={{ display:"flex",gap:8,marginBottom:12 }}>
+              <input value={newLocName} onChange={e=>setNewLocName(e.target.value)} placeholder="新位置名称" autoFocus onKeyDown={e => e.key === "Enter" && handleAddLoc()}
+                style={{ flex:1,padding:"8px 12px",borderRadius:8,border:"1px solid #3B82F6",fontSize:14,outline:"none" }} />
+              <button onClick={handleAddLoc} style={{ background:"#3B82F6",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:500,cursor:"pointer" }}>添加</button>
+              <button onClick={()=>{setShowAddLoc(false);setNewLocName("");}} style={{ background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:8,padding:"8px 10px",fontSize:13,cursor:"pointer" }}>✕</button>
+            </div>
+          )}
+
+          {locations.length === 0 && <p style={{ fontSize:13,color:"#D1D5DB",textAlign:"center",padding:"12px 0" }}>还没有自定义位置</p>}
+
+          {locations.map((loc, idx) => {
+            const c = LOC_COLORS[idx % LOC_COLORS.length];
+            const count = boxCountByLoc(loc);
+            const isEditing = editingLoc === loc;
+            return (
+              <div key={loc} style={{ display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop: idx > 0 ? "1px solid #F9FAFB" : "none" }}>
+                <div style={{ width:10,height:10,borderRadius:5,background:c.fg,flexShrink:0 }} />
+                {isEditing ? (
+                  <React.Fragment>
+                    <input value={editLocName} onChange={e=>setEditLocName(e.target.value)} autoFocus onKeyDown={e => e.key === "Enter" && handleRenameLoc(loc)}
+                      style={{ flex:1,padding:"4px 8px",borderRadius:6,border:"1px solid #3B82F6",fontSize:14,outline:"none" }} />
+                    <button onClick={() => handleRenameLoc(loc)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:14,color:"#3B82F6" }}>✓</button>
+                    <button onClick={() => setEditingLoc(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:14,color:"#9CA3AF" }}>✕</button>
+                  </React.Fragment>
+                ) : (
+                  <React.Fragment>
+                    <span style={{ flex:1,fontSize:14,color:"#374151" }}>{loc}</span>
+                    <span style={{ fontSize:12,color:"#D1D5DB" }}>{count} 个箱子</span>
+                    <button onClick={() => {setEditingLoc(loc);setEditLocName(loc);}} style={{ background:"none",border:"none",cursor:"pointer",padding:4 }}><EditIcon/></button>
+                    <button onClick={() => onDeleteLocation(loc)} style={{ background:"none",border:"none",cursor:"pointer",padding:4,color:"#EF4444" }}><TrashIcon/></button>
+                  </React.Fragment>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Backup status */}
         <div style={{ background:data.changesSinceBackup>=5?"#FEF3C7":"#ECFDF5",border:`1px solid ${data.changesSinceBackup>=5?"#FDE68A":"#A7F3D0"}`,borderRadius:14,padding:16 }}>
           <div style={{ fontSize:14,fontWeight:600,color:data.changesSinceBackup>=5?"#92400E":"#065F46" }}>{data.changesSinceBackup>=5?"⚠️ 建议备份":"✅ 数据安全"}</div>
-          <div style={{ fontSize:13,color:data.changesSinceBackup>=5?"#A16207":"#047857",marginTop:4,lineHeight:1.5 }}>上次备份：{lastBackup}<br/>未备份的改动：{data.changesSinceBackup} 项</div>
+          <div style={{ fontSize:13,color:data.changesSinceBackup>=5?"#A16207":"#047857",marginTop:4,lineHeight:1.5 }}>上次备份：{lastBackup}<br/>未备份改动：{data.changesSinceBackup} 项</div>
         </div>
+
         <div style={{ background:"#fff",borderRadius:14,border:"1px solid #F3F4F6",padding:16 }}>
           <div style={{ fontSize:14,fontWeight:600,color:"#374151",marginBottom:8 }}>当前数据</div>
-          <div style={{ fontSize:13,color:"#6B7280",lineHeight:1.8 }}>箱子数量：{data.boxes.length}<br/>物品总数：{data.boxes.reduce((s,b)=>s+b.items.length,0)}<br/>含照片物品：{data.boxes.reduce((s,b)=>s+b.items.filter(i=>i.photo).length,0)}</div>
+          <div style={{ fontSize:13,color:"#6B7280",lineHeight:1.8 }}>箱子：{data.boxes.length} · 物品：{data.boxes.reduce((s,b)=>s+b.items.length,0)} · 照片：{data.boxes.reduce((s,b)=>s+b.items.filter(i=>i.photo).length,0)} · 位置：{locations.length}</div>
         </div>
+
         <button onClick={onExport} style={{ width:"100%",padding:"16px",borderRadius:14,border:"none",background:"#3B82F6",color:"#fff",fontSize:16,fontWeight:600,cursor:"pointer",boxShadow:"0 2px 8px rgba(59,130,246,0.3)" }}>导出备份（JSON）</button>
         <input ref={fileRef} type="file" accept=".json" onChange={e => { if(e.target.files[0]) onImport(e.target.files[0]); }} style={{ display:"none" }} />
         <button onClick={() => fileRef.current?.click()} style={{ width:"100%",padding:"16px",borderRadius:14,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",fontSize:16,fontWeight:500,cursor:"pointer" }}>从备份恢复</button>
-        <p style={{ fontSize:12,color:"#D1D5DB",textAlign:"center",lineHeight:1.6,padding:"8px 0" }}>导出的 JSON 文件建议保存到 iCloud 云盘<br/>包含所有箱子、物品和照片数据</p>
+        <p style={{ fontSize:12,color:"#D1D5DB",textAlign:"center",lineHeight:1.6,padding:"8px 0" }}>导出的 JSON 文件建议保存到 iCloud 云盘<br/>包含所有箱子、物品、照片和位置数据</p>
       </div>
     </div>
   );
 }
 
-// ===== MOUNT =====
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 <script>
-// Register service worker for PWA offline support
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  });
-}
+if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); }); }
 </script>
 </body>
 </html>
