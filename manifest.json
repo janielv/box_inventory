@@ -2,7 +2,7 @@
   "name": "箱子清单",
   "short_name": "箱子清单",
   "start_url": ".",
-  "display": "standalone",
+  "display": "browser",
   "background_color": "#F9FAFB",
   "theme_color": "#F9FAFB",
   "icons": [
