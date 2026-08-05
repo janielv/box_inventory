@@ -202,12 +202,14 @@ function App() {
   const [locationFilter, setLocationFilter] = useState("全部");
   const [showAddBox, setShowAddBox] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
+  const [editingItem, setEditingItem] = useState(null); // {boxId, item} for editing
   const [showMoveModal, setShowMoveModal] = useState(null);
   const [batchMode, setBatchMode] = useState(false);
   const [batchSelected, setBatchSelected] = useState(new Set());
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [viewPhoto, setViewPhoto] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [nfcNotFound, setNfcNotFound] = useState(null); // boxId if NFC opened but no data
 
   useEffect(() => {
     const handleHash = () => {
@@ -215,7 +217,11 @@ function App() {
       if (hash.startsWith("#box-")) {
         const boxId = hash.slice(5);
         const d = loadData() || defaultData();
-        if (d.boxes.some(b => b.id === boxId)) { setSelectedBox(boxId); setTab("boxes"); }
+        if (d.boxes.some(b => b.id === boxId)) {
+          setSelectedBox(boxId); setTab("boxes"); setNfcNotFound(null);
+        } else {
+          setNfcNotFound(boxId);
+        }
       }
     };
     handleHash();
@@ -306,6 +312,11 @@ function App() {
     showToast("物品已删除", "success");
   };
 
+  const updateItem = (boxId, itemId, newName, newPhoto) => {
+    persist({ ...data, boxes: data.boxes.map(b => b.id === boxId ? { ...b, items: b.items.map(i => i.id === itemId ? { ...i, name: newName, photo: newPhoto } : i) } : b) });
+    showToast("物品已更新", "success");
+  };
+
   const moveItems = (fromBoxId, itemIds, toBoxId) => {
     const fromBox = data.boxes.find(b => b.id === fromBoxId);
     const movingItems = fromBox.items.filter(i => itemIds.includes(i.id));
@@ -374,6 +385,20 @@ function App() {
         </div>
       )}
 
+      {/* NFC opened but box not found */}
+      {nfcNotFound && (
+        <div style={{ position:"fixed",inset:0,zIndex:80,background:"#F9FAFB",display:"flex",alignItems:"center",justifyContent:"center",padding:32 }}>
+          <div style={{ textAlign:"center",maxWidth:320 }}>
+            <div style={{ fontSize:48,marginBottom:16 }}>🔍</div>
+            <h2 style={{ fontSize:18,fontWeight:700,color:"#1F2937",marginBottom:8 }}>找不到这个箱子</h2>
+            <p style={{ fontSize:14,color:"#6B7280",lineHeight:1.6,marginBottom:24 }}>
+              可能是因为你在主屏幕 App 里录入了数据，但 NFC 在 Safari 中打开。请确保平时也用 Safari 打开本工具来管理数据，这样 NFC 扫描才能读取到。
+            </p>
+            <button onClick={() => {setNfcNotFound(null); window.location.hash="";}} style={{ background:"#3B82F6",color:"#fff",border:"none",borderRadius:12,padding:"12px 32px",fontSize:15,fontWeight:600,cursor:"pointer" }}>进入箱子清单</button>
+          </div>
+        </div>
+      )}
+
       {/* ===== TAB: BOXES ===== */}
       {tab === "boxes" && !selectedBox && (
         <div>
@@ -433,6 +458,7 @@ function App() {
           onBack={() => { setSelectedBox(null); setBatchMode(false); setBatchSelected(new Set()); window.location.hash = ""; }}
           onAddItem={() => setShowAddItem(true)}
           onDeleteItem={(itemId) => setConfirmDelete({ type:"item",boxId:currentBox.id,itemId })}
+          onEditItem={(item) => setEditingItem({ boxId: currentBox.id, item })}
           onMoveItem={(item) => setShowMoveModal([item])}
           onDeleteBox={() => setConfirmDelete({ type:"box",boxId:currentBox.id })}
           onRename={(n) => renameBox(currentBox.id, n)}
@@ -482,6 +508,7 @@ function App() {
       {/* ===== MODALS ===== */}
       {showAddBox && <AddBoxModal onClose={() => setShowAddBox(false)} onAdd={addBox} locations={data.locations} onAddLocation={addLocation} />}
       {showAddItem && currentBox && <AddItemModal onClose={() => setShowAddItem(false)} onAdd={(n, p) => addItem(currentBox.id, n, p)} />}
+      {editingItem && <EditItemModal item={editingItem.item} onClose={() => setEditingItem(null)} onSave={(name, photo) => { updateItem(editingItem.boxId, editingItem.item.id, name, photo); setEditingItem(null); }} />}
       {showMoveModal && currentBox && (
         <MoveModal items={showMoveModal} boxes={data.boxes.filter(b => b.id !== currentBox.id)} locations={data.locations}
           onClose={() => setShowMoveModal(null)}
@@ -508,7 +535,7 @@ function App() {
 }
 
 // ===== BOX DETAIL VIEW =====
-function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteItem, onMoveItem, onDeleteBox, onRename, onLocationChange, onAddLocation, onIconChange, batchMode, setBatchMode, batchSelected, setBatchSelected, onBatchMove, onViewPhoto, onCopyNfcLink }) {
+function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteItem, onEditItem, onMoveItem, onDeleteBox, onRename, onLocationChange, onAddLocation, onIconChange, batchMode, setBatchMode, batchSelected, setBatchSelected, onBatchMove, onViewPhoto, onCopyNfcLink }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(box.name);
   const [showSettings, setShowSettings] = useState(false);
@@ -589,9 +616,10 @@ function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteIt
               </button>
             )}
             {item.photo ? <img src={item.photo} alt="" onClick={() => onViewPhoto(item.photo)} style={{ width:50,height:50,borderRadius:10,objectFit:"cover",flexShrink:0,cursor:"pointer" }} /> : <div style={{ width:50,height:50,borderRadius:10,background:"#F9FAFB",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0 }}>📷</div>}
-            <div style={{ flex:1,minWidth:0 }}><div style={{ fontSize:15,fontWeight:500,color:"#1F2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{item.name}</div></div>
+            <div onClick={() => !batchMode && onEditItem(item)} style={{ flex:1,minWidth:0,cursor:batchMode?"default":"pointer" }}><div style={{ fontSize:15,fontWeight:500,color:"#1F2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{item.name}</div></div>
             {!batchMode && (
               <div style={{ display:"flex",gap:4,flexShrink:0 }}>
+                <button onClick={() => onEditItem(item)} style={{ background:"#F3F4F6",border:"none",borderRadius:8,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#6B7280" }}><EditIcon/></button>
                 <button onClick={() => onMoveItem(item)} style={{ background:"#F3F4F6",border:"none",borderRadius:8,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#6B7280" }}><MoveIcon/></button>
                 <button onClick={() => onDeleteItem(item.id)} style={{ background:"#FEF2F2",border:"none",borderRadius:8,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#EF4444" }}><TrashIcon/></button>
               </div>
@@ -660,6 +688,28 @@ function AddItemModal({ onClose, onAdd }) {
         <button onClick={handleAdd} disabled={!name.trim()} style={{ flex:1,padding:"14px",borderRadius:12,border:"none",background:name.trim()?"#3B82F6":"#E5E7EB",color:name.trim()?"#fff":"#9CA3AF",fontSize:16,fontWeight:600,cursor:name.trim()?"pointer":"default" }}>添加并继续</button>
         <button onClick={onClose} style={{ padding:"14px 20px",borderRadius:12,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",fontSize:16,fontWeight:500,cursor:"pointer" }}>完成</button>
       </div>
+    </Modal>
+  );
+}
+
+// ===== EDIT ITEM MODAL =====
+function EditItemModal({ item, onClose, onSave }) {
+  const [name, setName] = useState(item.name);
+  const [photo, setPhoto] = useState(item.photo || null);
+  const [compressing, setCompressing] = useState(false);
+  const fileRef = useRef();
+  const handlePhoto = async (e) => { const f = e.target.files?.[0]; if(!f) return; setCompressing(true); setPhoto(await compressImage(f)); setCompressing(false); };
+  const handleSave = () => { if (!name.trim()) return; onSave(name.trim(), photo); };
+  return (
+    <Modal title="编辑物品" onClose={onClose}>
+      <input value={name} onChange={e => setName(e.target.value)} autoFocus style={{ width:"100%",padding:"12px 16px",borderRadius:12,border:"1px solid #E5E7EB",fontSize:16,marginBottom:12,outline:"none",color:"#1F2937" }} />
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display:"none" }} />
+      <button onClick={() => fileRef.current?.click()} style={{ width:"100%",padding:photo?0:"24px 16px",borderRadius:12,border:"2px dashed #E5E7EB",background:"#FAFAFA",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,marginBottom:8,overflow:"hidden",position:"relative",minHeight:photo?160:undefined }}>
+        {photo ? (<React.Fragment><img src={photo} alt="" style={{ width:"100%",height:160,objectFit:"cover",borderRadius:10 }} /><div style={{ position:"absolute",bottom:8,right:8,background:"rgba(0,0,0,0.5)",color:"#fff",borderRadius:6,padding:"4px 10px",fontSize:12 }}>更换照片</div></React.Fragment>
+        ) : compressing ? <span style={{ color:"#9CA3AF",fontSize:14 }}>压缩中...</span> : (<React.Fragment><CameraIcon/><span style={{ color:"#9CA3AF",fontSize:14 }}>添加照片</span></React.Fragment>)}
+      </button>
+      {photo && <button onClick={() => setPhoto(null)} style={{ width:"100%",padding:"8px",borderRadius:8,border:"none",background:"none",color:"#EF4444",fontSize:13,cursor:"pointer",marginBottom:8,textAlign:"center" }}>移除照片</button>}
+      <button onClick={handleSave} disabled={!name.trim()} style={{ width:"100%",padding:"14px",borderRadius:12,border:"none",background:name.trim()?"#3B82F6":"#E5E7EB",color:name.trim()?"#fff":"#9CA3AF",fontSize:16,fontWeight:600,cursor:name.trim()?"pointer":"default" }}>保存</button>
     </Modal>
   );
 }
