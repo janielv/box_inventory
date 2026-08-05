@@ -294,6 +294,10 @@ function App() {
     showToast("图标已更新", "success");
   };
 
+  const toggleNfc = (id) => {
+    persist({ ...data, boxes: data.boxes.map(b => b.id === id ? { ...b, nfcAdded: !b.nfcAdded } : b) });
+  };
+
   const deleteBox = (id) => {
     const box = data.boxes.find(b => b.id === id);
     if (box?.items.length > 0) { showToast("请先清空箱子里的物品", "error"); return; }
@@ -437,7 +441,7 @@ function App() {
                 <div style={{ display:"flex",alignItems:"center",gap:12,minWidth:0 }}>
                   <BoxIconDisplay box={box} locations={data.locations} size={42} />
                   <div style={{ minWidth:0 }}>
-                    <div style={{ fontSize:15,fontWeight:600,color:"#1F2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{box.name}</div>
+                    <div style={{ fontSize:15,fontWeight:600,color:"#1F2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6 }}>{box.name}{box.nfcAdded && <span style={{ fontSize:10,background:"#DBEAFE",color:"#2563EB",padding:"1px 6px",borderRadius:6,fontWeight:500,flexShrink:0 }}>NFC</span>}</div>
                     <div style={{ fontSize:13,color:"#9CA3AF",marginTop:2 }}>{box.items.length} 件物品{box.location ? ` · ${box.location}` : ""}</div>
                   </div>
                 </div>
@@ -465,6 +469,7 @@ function App() {
           onLocationChange={(l) => updateBoxLocation(currentBox.id, l)}
           onAddLocation={addLocation}
           onIconChange={(icon) => updateBoxIcon(currentBox.id, icon)}
+          onToggleNfc={() => toggleNfc(currentBox.id)}
           batchMode={batchMode} setBatchMode={setBatchMode}
           batchSelected={batchSelected} setBatchSelected={setBatchSelected}
           onBatchMove={() => {
@@ -535,7 +540,7 @@ function App() {
 }
 
 // ===== BOX DETAIL VIEW =====
-function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteItem, onEditItem, onMoveItem, onDeleteBox, onRename, onLocationChange, onAddLocation, onIconChange, batchMode, setBatchMode, batchSelected, setBatchSelected, onBatchMove, onViewPhoto, onCopyNfcLink }) {
+function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteItem, onEditItem, onMoveItem, onDeleteBox, onRename, onLocationChange, onAddLocation, onIconChange, onToggleNfc, batchMode, setBatchMode, batchSelected, setBatchSelected, onBatchMove, onViewPhoto, onCopyNfcLink }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(box.name);
   const [showSettings, setShowSettings] = useState(false);
@@ -568,6 +573,12 @@ function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteIt
           <button onClick={() => { iconRef.current?.click(); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid #F3F4F6",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#374151" }}>📷 更换图标照片</button>
           {box.icon && <button onClick={() => { onIconChange(""); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid #F3F4F6",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#374151" }}>🔄 恢复默认图标</button>}
           <button onClick={() => { onCopyNfcLink(); setShowSettings(false); }} style={{ width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid #F3F4F6",textAlign:"left",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#374151" }}><LinkIcon/> 复制 NFC 链接</button>
+          <div onClick={onToggleNfc} style={{ padding:"12px 16px",borderBottom:"1px solid #F3F4F6",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer" }}>
+            <span style={{ fontSize:14,color:"#374151",display:"flex",alignItems:"center",gap:8 }}>📡 已贴 NFC</span>
+            <div style={{ width:44,height:26,borderRadius:13,background:box.nfcAdded?"#3B82F6":"#E5E7EB",padding:2,transition:"background 0.2s",display:"flex",alignItems:box.nfcAdded?"center":"center" }}>
+              <div style={{ width:22,height:22,borderRadius:11,background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,0.2)",transition:"transform 0.2s",transform:box.nfcAdded?"translateX(18px)":"translateX(0)" }} />
+            </div>
+          </div>
           <div style={{ padding:"12px 16px",borderBottom:"1px solid #F3F4F6" }}>
             <label style={{ fontSize:12,color:"#9CA3AF",display:"block",marginBottom:6 }}>位置标签</label>
             <LocationPicker value={box.location} locations={locations} onChange={onLocationChange} onAddLocation={onAddLocation} />
@@ -586,9 +597,9 @@ function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteIt
           </div>
         ) : (
           <div style={{ display:"flex",alignItems:"center",gap:14 }}>
-            <BoxIconDisplay box={box} locations={locations} size={52} onClick={() => iconRef.current?.click()} />
+            <BoxIconDisplay box={box} locations={locations} size={52} onClick={box.icon ? () => onViewPhoto(box.icon) : undefined} />
             <div>
-              <h2 style={{ fontSize:22,fontWeight:800,color:"#111827" }}>{box.name}</h2>
+              <h2 style={{ fontSize:22,fontWeight:800,color:"#111827",display:"flex",alignItems:"center",gap:8 }}>{box.name}{box.nfcAdded && <span style={{ fontSize:11,background:"#DBEAFE",color:"#2563EB",padding:"2px 8px",borderRadius:6,fontWeight:500 }}>NFC</span>}</h2>
               <p style={{ fontSize:13,color:"#9CA3AF",marginTop:2 }}>{box.items.length} 件物品{box.location ? ` · ${box.location}` : ""}</p>
             </div>
           </div>
