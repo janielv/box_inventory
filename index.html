@@ -77,6 +77,88 @@ function saveData(d) {
 }
 const defaultData = () => ({ boxes: [], locations: [], lastBackup: null, changesSinceBackup: 0 });
 
+// ===== Drag Sort Hook =====
+function useDragSort(items, onReorder) {
+  const [drag, setDrag] = useState(null);
+  const timerRef = useRef(null);
+  const startRef = useRef(null);
+  const heightsRef = useRef([]);
+  const listRef = useRef(null);
+
+  const measure = () => {
+    if (!listRef.current) return;
+    const children = listRef.current.children;
+    heightsRef.current = Array.from(children).map(el => el.getBoundingClientRect().height + 10);
+  };
+
+  const getNewIndex = (fromIdx, dy) => {
+    const h = heightsRef.current;
+    let offset = 0;
+    if (dy > 0) {
+      for (let i = fromIdx + 1; i < h.length; i++) {
+        offset += h[i];
+        if (dy < offset - h[i] / 2) return i - 1;
+      }
+      return h.length - 1;
+    } else {
+      for (let i = fromIdx - 1; i >= 0; i--) {
+        offset -= h[i];
+        if (dy > offset + h[i] / 2) return i + 1;
+      }
+      return 0;
+    }
+  };
+
+  const onTouchStart = (e, index) => {
+    const t = e.touches[0];
+    startRef.current = { x: t.clientX, y: t.clientY, index };
+    timerRef.current = setTimeout(() => {
+      if (navigator.vibrate) navigator.vibrate(30);
+      measure();
+      setDrag({ index, startY: t.clientY, currentY: t.clientY });
+    }, 400);
+  };
+
+  const onTouchMove = useCallback((e) => {
+    if (drag) {
+      e.preventDefault();
+      setDrag(prev => prev ? { ...prev, currentY: e.touches[0].clientY } : null);
+    } else if (startRef.current) {
+      const t = e.touches[0];
+      if (Math.abs(t.clientY - startRef.current.y) > 8 || Math.abs(t.clientX - startRef.current.x) > 8) {
+        clearTimeout(timerRef.current);
+        startRef.current = null;
+      }
+    }
+  }, [drag]);
+
+  const onTouchEnd = useCallback(() => {
+    clearTimeout(timerRef.current);
+    startRef.current = null;
+    if (!drag) return;
+    const dy = drag.currentY - drag.startY;
+    const newIdx = getNewIndex(drag.index, dy);
+    if (newIdx !== drag.index) onReorder(drag.index, newIdx);
+    setDrag(null);
+  }, [drag, onReorder]);
+
+  const getStyle = (index) => {
+    if (!drag) return {};
+    const h = heightsRef.current;
+    if (index === drag.index) {
+      return { transform: `translateY(${drag.currentY - drag.startY}px) scale(1.03)`, zIndex: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.15)", opacity: 0.95, position: "relative", transition: "box-shadow 0.2s" };
+    }
+    const dy = drag.currentY - drag.startY;
+    const target = getNewIndex(drag.index, dy);
+    const dragH = h[drag.index] || 70;
+    if (drag.index < index && index <= target) return { transform: `translateY(-${dragH}px)`, transition: "transform 0.2s" };
+    if (drag.index > index && index >= target) return { transform: `translateY(${dragH}px)`, transition: "transform 0.2s" };
+    return { transition: "transform 0.2s" };
+  };
+
+  return { drag, listRef, onTouchStart, onTouchMove, onTouchEnd, getStyle };
+}
+
 // Icons
 const BoxIcon = () => <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>;
 const SearchIcon = () => <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="7"/><path strokeLinecap="round" d="M21 21l-4.35-4.35"/></svg>;
@@ -245,6 +327,8 @@ function App() {
   const backupWarning = data.changesSinceBackup >= 5;
   const currentBox = selectedBox ? data.boxes.find(b => b.id === selectedBox) : null;
 
+  const boxDrag = useDragSort(data.boxes, (from, to) => reorderBox(from, to));
+
   // ——— Location management ———
   const addLocation = (name) => {
     if (data.locations.includes(name)) { showToast("位置名称已存在", "error"); return false; }
@@ -333,6 +417,21 @@ function App() {
     const toBox = data.boxes.find(b => b.id === toBoxId);
     showToast(`已移动 ${movingItems.length} 件物品到「${toBox.name}」`, "success");
     setBatchMode(false); setBatchSelected(new Set());
+  };
+
+  const reorderBox = (fromIdx, toIdx) => {
+    const newBoxes = [...data.boxes];
+    const [moved] = newBoxes.splice(fromIdx, 1);
+    newBoxes.splice(toIdx, 0, moved);
+    persist({ ...data, boxes: newBoxes });
+  };
+
+  const reorderItem = (boxId, fromIdx, toIdx) => {
+    const box = data.boxes.find(b => b.id === boxId);
+    const newItems = [...box.items];
+    const [moved] = newItems.splice(fromIdx, 1);
+    newItems.splice(toIdx, 0, moved);
+    persist({ ...data, boxes: data.boxes.map(b => b.id === boxId ? { ...b, items: newItems } : b) });
   };
 
   const exportData = () => {
@@ -426,27 +525,33 @@ function App() {
               })}
             </div>
           )}
-          <div style={{ padding:16,display:"flex",flexDirection:"column",gap:10 }}>
+          <div ref={boxDrag.listRef} style={{ padding:16,display:"flex",flexDirection:"column",gap:10 }}>
             {filteredBoxes.length === 0 && (
               <div style={{ textAlign:"center",padding:"60px 20px",color:"#9CA3AF" }}>
                 <div style={{ fontSize:40,marginBottom:12 }}>📦</div>
                 <p style={{ fontSize:15 }}>{data.boxes.length === 0 ? "还没有箱子，点右上角 + 创建" : "当前筛选无结果"}</p>
               </div>
             )}
-            {filteredBoxes.map(box => (
-              <button key={box.id} onClick={() => { setSelectedBox(box.id); window.location.hash = `box-${box.id}`; }} style={{
-                background:"#fff",border:"1px solid #F3F4F6",borderRadius:14,padding:"14px 16px",
-                display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left",width:"100%",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"
-              }}>
-                <div style={{ display:"flex",alignItems:"center",gap:12,minWidth:0 }}>
+            {filteredBoxes.map((box, idx) => (
+              <div key={box.id}
+                onTouchStart={(e) => boxDrag.onTouchStart(e, idx)}
+                onTouchMove={boxDrag.onTouchMove}
+                onTouchEnd={boxDrag.onTouchEnd}
+                onClick={() => { if (!boxDrag.drag) { setSelectedBox(box.id); window.location.hash = `box-${box.id}`; } }}
+                style={{
+                  background:"#fff",border:"1px solid #F3F4F6",borderRadius:14,padding:"14px 16px",
+                  display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left",width:"100%",boxShadow:"0 1px 3px rgba(0,0,0,0.04)",
+                  ...boxDrag.getStyle(idx)
+                }}>
+                <div style={{ display:"flex",alignItems:"center",gap:12,minWidth:0,flex:1 }}>
                   <BoxIconDisplay box={box} locations={data.locations} size={42} />
                   <div style={{ minWidth:0 }}>
                     <div style={{ fontSize:15,fontWeight:600,color:"#1F2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6 }}>{box.name}{box.nfcAdded && <span style={{ fontSize:10,background:"#DBEAFE",color:"#2563EB",padding:"1px 6px",borderRadius:6,fontWeight:500,flexShrink:0 }}>NFC</span>}</div>
                     <div style={{ fontSize:13,color:"#9CA3AF",marginTop:2 }}>{box.items.length} 件物品{box.location ? ` · ${box.location}` : ""}</div>
                   </div>
                 </div>
-                <ChevronRight/>
-              </button>
+                {!boxDrag.drag && <ChevronRight/>}
+              </div>
             ))}
           </div>
           <div style={{ textAlign:"center",padding:"0 16px 16px" }}>
@@ -470,6 +575,7 @@ function App() {
           onAddLocation={addLocation}
           onIconChange={(icon) => updateBoxIcon(currentBox.id, icon)}
           onToggleNfc={() => toggleNfc(currentBox.id)}
+          onReorderItem={(fromIdx, toIdx) => reorderItem(currentBox.id, fromIdx, toIdx)}
           batchMode={batchMode} setBatchMode={setBatchMode}
           batchSelected={batchSelected} setBatchSelected={setBatchSelected}
           onBatchMove={() => {
@@ -540,11 +646,12 @@ function App() {
 }
 
 // ===== BOX DETAIL VIEW =====
-function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteItem, onEditItem, onMoveItem, onDeleteBox, onRename, onLocationChange, onAddLocation, onIconChange, onToggleNfc, batchMode, setBatchMode, batchSelected, setBatchSelected, onBatchMove, onViewPhoto, onCopyNfcLink }) {
+function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteItem, onEditItem, onMoveItem, onDeleteBox, onRename, onLocationChange, onAddLocation, onIconChange, onToggleNfc, onReorderItem, batchMode, setBatchMode, batchSelected, setBatchSelected, onBatchMove, onViewPhoto, onCopyNfcLink }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(box.name);
   const [showSettings, setShowSettings] = useState(false);
   const iconRef = useRef();
+  const itemDrag = useDragSort(box.items, (from, to) => onReorderItem(from, to));
 
   const handleRename = () => {
     if (editName.trim() && editName.trim() !== box.name) { const ok = onRename(editName.trim()); if (ok !== false) setEditing(false); }
@@ -553,7 +660,7 @@ function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteIt
 
   const handleIconUpload = async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
-    const compressed = await compressImage(file, 120, 0.6);
+    const compressed = await compressImage(file, 300, 0.5);
     onIconChange(compressed);
   };
 
@@ -616,10 +723,14 @@ function BoxDetailView({ box, allBoxes, locations, onBack, onAddItem, onDeleteIt
         </div>
       )}
 
-      <div style={{ padding:"0 16px",display:"flex",flexDirection:"column",gap:8 }}>
+      <div ref={itemDrag.listRef} style={{ padding:"0 16px",display:"flex",flexDirection:"column",gap:8 }}>
         {box.items.length === 0 && <div style={{ textAlign:"center",padding:"48px 20px",color:"#9CA3AF" }}><p style={{ fontSize:14 }}>箱子是空的，点下面的 + 添加物品</p></div>}
-        {box.items.map(item => (
-          <div key={item.id} style={{ background:"#fff",border:batchSelected.has(item.id)?"2px solid #3B82F6":"1px solid #F3F4F6",borderRadius:14,padding:"10px 12px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
+        {box.items.map((item, idx) => (
+          <div key={item.id}
+            onTouchStart={(e) => !batchMode && itemDrag.onTouchStart(e, idx)}
+            onTouchMove={itemDrag.onTouchMove}
+            onTouchEnd={itemDrag.onTouchEnd}
+            style={{ background:"#fff",border:batchSelected.has(item.id)?"2px solid #3B82F6":"1px solid #F3F4F6",borderRadius:14,padding:"10px 12px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 1px 3px rgba(0,0,0,0.04)", ...(!batchMode ? itemDrag.getStyle(idx) : {}) }}>
             {batchMode && (
               <button onClick={() => { const s = new Set(batchSelected); s.has(item.id)?s.delete(item.id):s.add(item.id); setBatchSelected(s); }}
                 style={{ width:24,height:24,borderRadius:7,border:batchSelected.has(item.id)?"none":"2px solid #D1D5DB",background:batchSelected.has(item.id)?"#3B82F6":"#fff",flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff" }}>
@@ -652,7 +763,7 @@ function AddBoxModal({ onClose, onAdd, locations, onAddLocation }) {
   const handleAdd = () => { if (!name.trim()) return; const ok = onAdd(name.trim(), location, icon); if (ok !== false) onClose(); };
   const handleIcon = async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
-    setIcon(await compressImage(file, 120, 0.6));
+    setIcon(await compressImage(file, 300, 0.5));
   };
 
   return (
